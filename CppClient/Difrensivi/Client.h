@@ -47,26 +47,40 @@ private:
     RSAPrivateWrapper* dec_rsapriv_ = nullptr; // RSA decrypt with private key 
 
     /*Client - server communications private functions*/
+    //Parse client details from TRANSFER_INFO file
     void parse_transfer_info_file();
+    //Send a request of register a new client
     void send_registration_request();
+    //Send a request of re-login existing client
     void send_repeat_registration_request();
-    ResponseHeader* send_user_login_request_to_server(uint16_t requestCode);
-    string get_encrypted_aes_key(ResponseHeader* resHead);
+    //Send user login request, decide if the client is new on exiting based on ME_INFO file
+    ResponseHeader* send_user_login_request_to_server(uint16_t requestCode); 
+    //Send Public key to server
     string send_public_key();
-    string getAES_key();
+    //send an encrypted file to the server
     string send_file_request(string symmetricKey);
-    void CRC_succses();
-    void CRC_failed();
-    void CRC_failed_four_times();
+    //Get an encrypted AES key from server on relogin request
+    string get_encrypted_aes_key(ResponseHeader* resHead);
+    //Get a AES key fom server (first login)
+    string get_aes_key();
+   //File CRC verification (client crc vs. server) done succesfully
+    void send_crc_succses();
+    //File CRC verification (client crc vs. server) fail, CRC are not equal
+    void send_file_crc_failed();
+    //File CRC verification (client crc vs. server) fail 4 times , stop process
+    void send_file_crc_failed_four_times();
+    /*Helper function*/
+
+    //Read client details from ME_INFO file , for check if client exist.
     void load_client_id_details();
-    string load_private_key_details();
+    /*Read private key file used on re-login process*/
     static string readPrivateKeyFile();
-    string get_file_content(string filename);
-    static ofstream open_out_file(const string& filename);
-    static ifstream open_input_files(const string& filename);
+    /* Build a message header for send to server*/
     static vector<char> build_Header(char* clientId, char version, uint16_t code, uint32_t size);
+    /*build send file message payload , send to server */
     vector<char> build_file_payload(char* clientId, uint32_t contentSize, const string& fName, const string& encFile);
-    vector<char> build_CRC_payload(char* clientID, const string& fName);
+    /* build send crc message payload*/
+    vector<char> build_crc_message_payload(char* clientID, const string& fName);
     /*  send and receive from socket */
     size_t send_bytes(char* data, size_t amount);
 	size_t send_bytes(vector<char> vec, size_t amount);

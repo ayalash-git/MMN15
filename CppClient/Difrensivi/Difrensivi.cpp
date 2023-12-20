@@ -4,11 +4,10 @@ int main(int argc, char* argv[])
 {
     try
     {
+        //Main code start point
         boost::asio::io_context io_context;
         Client c(io_context);
-
         c.process_requests();
-
         c.close_connection();
     }
     catch (exception& e)

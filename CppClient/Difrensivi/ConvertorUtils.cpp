@@ -88,7 +88,7 @@ void ConvertorUtils::ascii2HexBytes(char* dest, const string& src, size_t len)
 /*
 * An API for convert char to hexadecimal format
 */
-void ConvertorUtils::hexify(const unsigned char* buffer, unsigned int length)
+void ConvertorUtils::charToHex(const unsigned char* buffer, unsigned int length)
 {
 	const ios::fmtflags f(cout.flags());
 	cout << hex;

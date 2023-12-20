@@ -145,6 +145,7 @@
     <ClCompile Include="Client.cpp" />
     <ClCompile Include="ConvertorUtils.cpp" />
     <ClCompile Include="Difrensivi.cpp" />
+    <ClCompile Include="FileUtils.cpp" />
     <ClCompile Include="RSAWrapper.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -153,6 +154,7 @@
     <ClInclude Include="CheckSum.h" />
     <ClInclude Include="Client.h" />
     <ClInclude Include="ConvertorUtils.h" />
+    <ClInclude Include="FileUtils.h" />
     <ClInclude Include="RSAWrapper.h" />
     <ClInclude Include="Utils.h" />
   </ItemGroup>
