@@ -13,6 +13,7 @@
 #include <boost/asio.hpp>
 #include "CheckSum.h"
 #include "ConvertorUtils.h"
+#include "FileUtils.h"
 
 using namespace std;
 using boost::asio::ip::tcp;
@@ -48,7 +49,7 @@ void Client::parse_transfer_info_file()
 	size_t pos = 0;
 
 	//opens the file transfer.info , throw exception if not exist
-	ifstream file = open_input_files(TRANSFER_INFO_FILE);
+	ifstream file = FileUtils::open_input_file(TRANSFER_INFO_FILE);
 
 	//read ip and port from file
 	getline(file, line);
@@ -132,7 +133,6 @@ void Client::parse_transfer_info_file()
 //This function handles the processing of client requests from the server
 void Client::process_requests()
 {
-	//const string file_content = get_file_content(filepath_);
 	string dec_file;
 	try{
 
@@ -147,7 +147,7 @@ void Client::process_requests()
 			//load CLIENT ID data from ME_INFO file
 			load_client_id_details();
 			//load private key data from priv.key file
-			load_private_key_details();
+			private_key_ = readPrivateKeyFile();
 
 			send_repeat_registration_request();
 
@@ -171,18 +171,15 @@ void Client::process_requests()
 				cout << "server_CRC " << server_CRC << endl;
 				if (server_CRC != client_CRC)
 				{
-					CRC_failed();
+					send_file_crc_failed();
 					send_times++;
 					cout << "Client CRC is different than server CRC time: " << send_times << endl;
-					
-
 				}
 				else
 				{
-				
 					cout << "CRC are equals!!!!!!!" << endl;
 					//If he was able to compare it
-					CRC_succses();
+					send_crc_succses();
 					break;
 				}
 			
@@ -192,10 +189,9 @@ void Client::process_requests()
 		if (send_times> SEND_TIMES)
 		{
 			cout << "CRC failed four times " << endl;
-				//If not he was able to compare it
-			CRC_failed_four_times();
+			//CRC verifcation failed 4 time , send final bad message to server
+			send_file_crc_failed_four_times();
 		}
-		
 		
 	}
 	catch (exception& e)
@@ -231,7 +227,8 @@ string Client::get_encrypted_aes_key(ResponseHeader* resHead) {
 
 	RSAPrivateWrapper rsapriv;
 	string pubkey = public_key_;
-	string base64key2 = load_private_key_details();
+	private_key_ = readPrivateKeyFile();
+	string base64key2 = private_key_;
 
 	RSAPrivateWrapper rsapriv_other(Base64Convertor::decodeStr(base64key2));
 	// receive payload
@@ -243,14 +240,14 @@ string Client::get_encrypted_aes_key(ResponseHeader* resHead) {
 	receive_bytes(aes_key_size);
 
 	cout << "encrypted AES :" << endl;
-	ConvertorUtils::hexify((unsigned char*)buffer_data, sizeof(buffer_data));
+	ConvertorUtils::charToHex((unsigned char*)buffer_data, sizeof(buffer_data));
 
 	string cipher = ConvertorUtils::convert_to_string(buffer_data);
 	cout << "cipher len = " << cipher.length() << endl;
 	string decrypted = rsapriv_other.decrypt(cipher);
 	cout << "decrypted AES:" << endl;
 
-	ConvertorUtils::hexify((unsigned char*)decrypted.c_str(), decrypted.length());
+	ConvertorUtils::charToHex((unsigned char*)decrypted.c_str(), decrypted.length());
 	delete(resHead);
 	return decrypted;
 }
@@ -291,7 +288,7 @@ void Client::send_registration_request()
 	delete(resHead);
 	//register new client , save its details in me.info file
 	//open file , exit with error in inner function
-	ofstream me_file = open_out_file(ME_INFO_FILE);
+	ofstream me_file = FileUtils::open_out_file(ME_INFO_FILE);
 	//line 1 user name
 	me_file << username_ << endl;
 	//line 2 Client UUID in ASCII format
@@ -330,7 +327,7 @@ void Client::send_repeat_registration_request()
 				send_registration_request();
 			}
 			catch (Exception) {
-				cout << "an unexpected error happenes during re-login process , please send new request"  << endl;
+				cerr << "an unexpected error happenes during re-login process , please send new request"  << endl;
 			}
 			
 		}
@@ -364,13 +361,11 @@ string Client::send_public_key()
 	//get the public key
 	string pubkey = rsapriv.getPublicKey();
 	//get the private key and encodeStr it as base64 
-//	string base64key = Base64Convertor::encodeStr(rsapriv.getPrivateKey());
-//	RSAPrivateWrapper rsapriv_other(Base64Convertor::decodeStr(base64key));
 	private_key_ = Base64Convertor::encodeStr(rsapriv.getPrivateKey());//get the private key and encode it as base64 
 	public_key_ = pubkey;
-	ofstream privkey_file = open_out_file(PRIVATE_KEY_FILE);
+	ofstream privkey_file = FileUtils::open_out_file(PRIVATE_KEY_FILE);
 	cout << "Creating private key: " << PRIVATE_KEY_FILE << endl;
-	////// private key created in the first run of the program in base 64 format
+	// private key created in the first run of the program in base 64 format
 	privkey_file << private_key_ << endl;
 	privkey_file.close();
 
@@ -383,15 +378,14 @@ string Client::send_public_key()
 	send_bytes(userNameData.data(), MAX_USERNAME);//user name - 255 bytes
 	send_bytes(pubkey, PUBUBLIC_KEY_SIZE);//public key 160 bytes
 	cout << "public key:" << endl;
-	ConvertorUtils::hexify((unsigned char*)pubkey.c_str(), pubkey.length());
+	ConvertorUtils::charToHex((unsigned char*)pubkey.c_str(), pubkey.length());
 	cout << "Public key size: " << pubkey.length() << endl;
 
-	return getAES_key();
+	return get_aes_key();
 }
 
 
-
-string Client::getAES_key()
+string Client::get_aes_key()
 {
 	string decrypted;
 	receive_bytes(HEADER_SIZE_RESPONSE);
@@ -411,7 +405,6 @@ string Client::getAES_key()
 		const string error_msg = "Get AES key response , got invalid status code ";
 		throw exception(error_msg.c_str());
 	}
-
 	return decrypted;
 }
 
@@ -423,14 +416,14 @@ string Client::send_file_request(string symetricKey)
 	
 	// create encryption engine
 	AESWrapper aes((unsigned char*)symetricKey.data(), SYMMETRIC_KEY_SIZE);
-	string content = get_file_content(filename_);
+	string content = FileUtils::get_file_content(filename_);
 	//encrypted_file contains  - encrypted content file
 	encrypted_file = aes.encrypt(content.c_str(), content.length());
 	
 	//std::string encrypted_file= AESWrapper::encryptFile(filepath_, std::move(symetricKey));
 	size_t encFile_size = AESWrapper::get_encryptedFile_size(filepath_);
 	cout << "Encrypted_file size for send: "<< encFile_size << endl;
-	ConvertorUtils::hexify(reinterpret_cast<const unsigned char*>(encrypted_file.c_str()), encrypted_file.length());	
+	ConvertorUtils::charToHex(reinterpret_cast<const unsigned char*>(encrypted_file.c_str()), encrypted_file.length());	
 	
 	// send request header and message payload
 	const vector<char>header = build_Header(clientID_.data(), version, SEND_FILE, CONTENT_SIZE + MAX_FILENAME + encFile_size);//*& 1028
@@ -458,7 +451,7 @@ string Client::send_file_request(string symetricKey)
 	//recieve payload
 	receive_bytes(UUID_SIZE + CONTENT_SIZE + MAX_FILENAME);//not needed data
 	receive_bytes(CRC_SIZE);//recieve server crc calculation
-	ConvertorUtils::hexify((unsigned char*)buffer_data, sizeof(buffer_data));
+	ConvertorUtils::charToHex((unsigned char*)buffer_data, sizeof(buffer_data));
 
 	string server_crc = ConvertorUtils::convert_to_string(buffer_data);
 
@@ -473,7 +466,7 @@ void Client::load_client_id_details()
 	string line;
 
 	//Trying to open me.info file and read the client ID , if file not exist inner function throw exception
-	ifstream file = open_input_files(ME_INFO_FILE);
+	ifstream file = FileUtils::open_input_file(ME_INFO_FILE);
 	getline(file, line);
 	cout << line << endl; 
 	if (line.empty()) {
@@ -499,12 +492,12 @@ void Client::load_client_id_details()
 
 	ConvertorUtils::ascii2HexBytes(clientID_.data(), line, UUID_SIZE);
 	cout << "Re login - load_client_id_details API Client ID: " << clientID_.data() << " size : " <<clientID_.size() << endl;
-	ConvertorUtils::hexify(reinterpret_cast<const unsigned char*>(clientID_.data()), clientID_.size());
+	ConvertorUtils::charToHex(reinterpret_cast<const unsigned char*>(clientID_.data()), clientID_.size());
 }
 
 string Client::readPrivateKeyFile()
 {
-	ifstream file = open_input_files(PRIVATE_KEY_FILE);
+	ifstream file = FileUtils::open_input_file(PRIVATE_KEY_FILE);
 	string line;
 	string file_lines = "";
 
@@ -531,36 +524,12 @@ string Client::readPrivateKeyFile()
 
 }
 
-string Client::load_private_key_details()
-{
-	//attempt to open the file and read the private key, exception should handle in inner function
-	private_key_ = readPrivateKeyFile();
-	cout << "Private Key file contains:" << private_key_ << endl;
-	return private_key_;
-}
-
-//This function reads the contents of the file into a string
-string Client::get_file_content(string filename)
-{
-	string content;
-	//open a file throw an exception when file not exist
-	ifstream file = open_input_files(filename);
-
-	while (!file.eof())
-	{
-		getline(file, content);
-	}
-	file.close();
-	cout << "The length of the file "<< filename<< " is: " << content.size()<< endl;
-	return content;
-}
-
 //this function handles the processes when the CRC of client and server are equal 1029
-void Client::CRC_succses()
+void Client::send_crc_succses()
 {
 	/* construct request header and send */
 	const vector<char>header = build_Header(clientID_.data(), version, FILE_CRC_OK, MAX_FILENAME);
-	const vector<char>crcPayload = build_CRC_payload(clientID_.data(), filepath_);
+	const vector<char>crcPayload = build_crc_message_payload(clientID_.data(), filepath_);
 
 	// send header and payload to server
 	send_bytes(header, HEADER_SIZE);
@@ -592,22 +561,21 @@ void Client::CRC_succses()
 
 
 //Sed CRC fail message with file name in the payload (code 1030)
-void Client::CRC_failed()
+void Client::send_file_crc_failed()
 {
 	//construct request header and send 
 	const vector<char>header = build_Header(clientID_.data(), version, FILE_CRC_FAILED, MAX_FILENAME);
 	send_bytes(header, HEADER_SIZE);
-	vector<char>crcPayload = build_CRC_payload(clientID_.data(), filepath_);
+	vector<char>crcPayload = build_crc_message_payload(clientID_.data(), filepath_);
 	send_bytes(crcPayload, MAX_FILENAME);
-
 }
 
 
 //This function when the client and server compare 3 times and failed 4 times closes the server
-void Client::CRC_failed_four_times()
+void Client::send_file_crc_failed_four_times()
 {
 	const vector<char>header = build_Header(clientID_.data(), version, FILE_CRC_FAILED_FOUR_TIMES, MAX_FILENAME);// UUID_SIZE +
-	const vector<char>payload = build_CRC_payload(clientID_.data(), filepath_);
+	const vector<char>payload = build_crc_message_payload(clientID_.data(), filepath_);
 
 	send_bytes(header, HEADER_SIZE);
 	send_bytes(payload, MAX_FILENAME);
@@ -622,7 +590,7 @@ void Client::CRC_failed_four_times()
 * and according to protocol.
 * Notice that we do not refer to the actual content.
 */
-vector<char> Client::build_CRC_payload(char* clientID, const string& fName)
+vector<char> Client::build_crc_message_payload(char* clientID, const string& fName)
 {
 	vector<char> crc_payload;
 
@@ -636,37 +604,6 @@ vector<char> Client::build_CRC_payload(char* clientID, const string& fName)
 
 	cout << "crcPayload size for send: " << crc_payload.size() << endl;
 	return crc_payload;
-}
-
-ofstream Client::open_out_file(const string& filename)
-{
-	ofstream file;
-	file.open(filename);
-	if (!file)
-	{
-		cout << "Error in file: " << filename << ". ";
-		throw exception("File does not exist");
-	}
-	return file;
-}
-
-/*
-* //TODO can move to generl utils
-* An API for open file for read (input)
-* Return File stream to read from 
-*/
-ifstream Client::open_input_files(const string& fileName)
-{
-	ifstream file;
-
-	file.open(fileName);
-	if (!file) //File not found
-	{
-		const string err = "Cannot open file: " + fileName;
-		throw exception(err.c_str());
-	}
-
-	return file;
 }
 
 /*
@@ -718,23 +655,20 @@ vector<char> Client::build_file_payload(char* clientId, uint32_t contentSize, co
 	filePayload.push_back(static_cast<uint8_t>(contentSize >> 8));
 	filePayload.push_back(static_cast<uint8_t>(contentSize >> 16));
 	filePayload.push_back(static_cast<uint8_t>(contentSize >> 24));
-	cout << " After content size " << filePayload.size();
+	
 	
 	// convert string file name to bytes vector with max file name size
 	vector<char> fileName(fName.c_str(), fName.c_str() + MAX_FILENAME);
 	
 	for (size_t i = 0; i < MAX_FILENAME; i++)
 		filePayload.push_back(static_cast<uint8_t>(fileName[i]));
-	cout << " File path size " << fileName.size() << " Full size with file size " << filePayload.size();
+	cout << " Full size with file size " << filePayload.size();
 	const vector<char> enc_file(encFile.c_str(), encFile.c_str() + contentSize);
 
 	for (size_t i = 0; i < contentSize; i++)
 		filePayload.push_back(static_cast<uint8_t>(enc_file[i]));
 
-	cout << " Size of file to send: " << " " << contentSize << endl;
-
 	cout << " Final filePayload size = " << filePayload.size() << endl;
-
 	return filePayload;
 }
 
@@ -778,19 +712,17 @@ size_t Client::send_bytes(string str, size_t amount)
 	return bytes_sent;
 }
 
-//Try to get an exact amount
+//Recevie bytes from server trsaction
 size_t Client::receive_bytes(size_t amount)
 {
-
 	clear_buffer(buffer_data, CHUNK_SIZE);
 
 	const size_t bytesRev = boost::asio::read(socket_, boost::asio::buffer(buffer_data, amount));
 
-	if (bytesRev < amount)
+	if (bytesRev != amount)
 	{
-
 		clear_buffer(buffer_data, CHUNK_SIZE);
-		const string err = "Received fewer bytes than expected " + to_string(bytesRev) + " out of " + to_string(amount);
+		const string err = "Received different bytes than expected " + to_string(bytesRev) + " out of " + to_string(amount);
 		throw exception(err.c_str());
 	}
 	return bytesRev;

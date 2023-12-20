@@ -10,6 +10,6 @@ public:
 	static string convert_to_string(const char* buffer);
 	static string hex2Ascii(const char* arr, size_t len);
 	static void ascii2HexBytes(char* dest, const string& src, size_t len);
-	static void hexify(const unsigned char* buffer, unsigned int length);
+	static void charToHex(const unsigned char* buffer, unsigned int length);
 };
 
